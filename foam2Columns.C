@@ -46,7 +46,14 @@ int main(int argc, char *argv[])
     (
         "fields",
         "list",
-        "specify a list of fields to be reconstructed. Eg, '(U T p)' - "
+        "specify a list of fields to be processed. Eg, '(U T p)' - "
+        "regular expressions not currently supported"
+    );
+    argList::addOption
+    (
+        "field",
+        "word",
+        "specify a field to be processed. Eg, '(U T p)' - "
         "regular expressions not currently supported"
     );
     #include "setRootCase.H"
@@ -62,6 +69,12 @@ int main(int argc, char *argv[])
     if (args.optionFound("fields"))
     {
         args.optionLookup("fields")() >> selectedFieldNames;
+    }
+    if (args.optionFound("field"))
+    {
+        word selectedFieldName;
+        args.optionLookup("field")() >> selectedFieldName;
+        selectedFieldNames.setSize(1, selectedFieldName);
     }
 
     forAll(timeDirs, timeI)
@@ -126,9 +139,9 @@ int main(int argc, char *argv[])
                 << mesh.C()[cellI].component(1) << "\t"
                 << mesh.C()[cellI].component(2);
 
-            forAll (selectedFieldNames, fieldI)
+            for (auto Field : allFields)
             {
-                foam2Columns << "\t" << allFields[fieldI][cellI];
+                foam2Columns << "\t" << Field[cellI];
             }
             foam2Columns << endl;
         }
