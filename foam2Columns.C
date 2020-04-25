@@ -139,9 +139,11 @@ int main(int argc, char *argv[])
             //    << mesh.C()[cellI].component(1) << "\t"
             //    << mesh.C()[cellI].component(2);
 
-            for (auto Field : allFields)
+            //for (auto Field : allFields) // too slow!!!
+            forAll(allFields, fieldI)
             {
-                foam2Columns << Field[cellI] << "\t";
+                //foam2Columns << Field[cellI] << "\t";
+                foam2Columns << allFields[fieldI][cellI] << "\t";
             }
             foam2Columns << endl;
         }
