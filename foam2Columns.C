@@ -121,29 +121,29 @@ int main(int argc, char *argv[])
         Info<<"outputFile======="<<outputFile<<endl;
         OFstream foam2Columns(outputFile);
 
-        //foam2Columns
-        //    << "x" << "\t"
-        //    << "y" << "\t"
-        //    << "z" ;
+        foam2Columns
+            << "x" << "\t"
+            << "y" << "\t"
+            << "z" ;
         forAll (selectedFieldNames, fieldI)
         {
-            foam2Columns << selectedFieldNames[fieldI] << "\t";
+            foam2Columns << "\t" << selectedFieldNames[fieldI];
         }
 
         foam2Columns << endl;
 
         forAll (allFields[0], cellI)
         {
-            //foam2Columns
-            //    << mesh.C()[cellI].component(0) << "\t"
-            //    << mesh.C()[cellI].component(1) << "\t"
-            //    << mesh.C()[cellI].component(2);
+            foam2Columns
+                << mesh.C()[cellI].component(0) << "\t"
+                << mesh.C()[cellI].component(1) << "\t"
+                << mesh.C()[cellI].component(2);
 
             //for (auto Field : allFields) // too slow!!!
             forAll(allFields, fieldI)
             {
                 //foam2Columns << Field[cellI] << "\t";
-                foam2Columns << allFields[fieldI][cellI] << "\t";
+                foam2Columns << "\t" << allFields[fieldI][cellI];
             }
             foam2Columns << endl;
         }
