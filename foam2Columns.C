@@ -58,8 +58,6 @@ int main(int argc, char *argv[])
     );
     #include "setRootCase.H"
     #include "createTime.H"
-    #include "createDynamicFvMesh.H"
-    #include "createDyMControls.H"
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
@@ -80,7 +78,8 @@ int main(int argc, char *argv[])
     forAll(timeDirs, timeI)
     {
         runTime.setTime(timeDirs[timeI], timeI);
-        Info<< "Time = " << runTime.timeName() << endl;
+        #include "createMesh.H"
+        Info<< "mesh.nCells() = " << mesh.nCells() << endl;
 
         // Maintain a stack of the stored objects to clear after executing
         LIFOStack<regIOobject*> storedObjects;
@@ -118,7 +117,7 @@ int main(int argc, char *argv[])
         {
             outputFile = outputFile + '_' + selectedFieldNames[fieldI];
         }
-        Info<<"outputFile======="<<outputFile<<endl;
+        Info<< "outputFile =" << outputFile << endl;
         OFstream foam2Columns(outputFile);
 
         foam2Columns
@@ -139,10 +138,8 @@ int main(int argc, char *argv[])
                 << mesh.C()[cellI].component(1) << "\t"
                 << mesh.C()[cellI].component(2);
 
-            //for (auto Field : allFields) // too slow!!!
             forAll(allFields, fieldI)
             {
-                //foam2Columns << Field[cellI] << "\t";
                 foam2Columns << "\t" << allFields[fieldI][cellI];
             }
             foam2Columns << endl;
@@ -154,7 +151,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    Info<<"Finished!"<<endl;
+    Info<< "Finished!" << endl;
 
     return 0;
 }
