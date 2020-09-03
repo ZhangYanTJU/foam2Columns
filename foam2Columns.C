@@ -30,14 +30,10 @@ Description
 \*---------------------------------------------------------------------------*/
 #include "fvCFD.H"
 #include "OFstream.H"
-#include "dynamicFvMesh.H"
-#include "pimpleControl.H"
-#include "CorrectPhi.H"
-#include "fvOptions.H"
-
 #include "ReadFields.H" // for the define of class::IOobjectList and function::readFields
 #include "cloud.H" //cloud::prefix
 #include "passiveParticleCloud.H"
+
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 int main(int argc, char *argv[])
 {
@@ -131,7 +127,7 @@ int main(int argc, char *argv[])
                         << cloudName << endl;
 
                     fileName outputFile = outputPath/fileName("Lagrangian");
-                    outputFile = outputFile + '_' + cloudName;              
+                    outputFile = outputFile + '_' + cloudName;
 
                     forAll (selectedLagrangianFields, fieldI)
                     {
