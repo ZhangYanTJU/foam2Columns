@@ -39,19 +39,18 @@ int main(int argc, char *argv[])
 {
     #include "removeCaseOptions.H"
     timeSelector::addOptions();
-
-    argList::addOption
-    (
-        "field",
-        "word",
-        "specify a volScalarField to be processed. Eg, T - "
-        "regular expressions not currently supported"
-    );
     argList::addOption
     (
         "fields",
         "list",
-        "specify a list of volScalarFields to be processed. Eg, '(T p)' - "
+        "specify a list of volScalarFields to be processed. Eg, '(p T)' - "
+        "regular expressions not currently supported"
+    );
+    argList::addOption
+    (
+        "vectorFields",
+        "list",
+        "specify a list of volVectorFields to be processed. Eg, '(U)' - "
         "regular expressions not currently supported"
     );
     argList::addOption
@@ -69,16 +68,15 @@ int main(int argc, char *argv[])
 
     instantList timeDirs = timeSelector::select0(runTime, args);
 
-    List<word> selectedFieldNames;
-    if (args.optionFound("field"))
-    {
-        word selectedFieldName;
-        args.optionLookup("field")() >> selectedFieldName;
-        selectedFieldNames.setSize(1, selectedFieldName);
-    }
+    List<word> selectedScalarFields;
     if (args.optionFound("fields"))
     {
-        args.optionLookup("fields")() >> selectedFieldNames;
+        args.optionLookup("fields")() >> selectedScalarFields;
+    }
+    List<word> selectedVectorFields;
+    if (args.optionFound("vectorFields"))
+    {
+        args.optionLookup("vectorFields")() >> selectedVectorFields;
     }
     List<word> selectedLagrangianFields;
     if (args.optionFound("lagrangianFields"))
@@ -206,21 +204,31 @@ int main(int argc, char *argv[])
         }
 
         // For Eulerian scalarFields foam2Columns
-        if(selectedFieldNames.size())
+        if(selectedScalarFields.size()||selectedVectorFields.size())
         {
             // Maintain a stack of the stored objects to clear after executing
             LIFOStack<regIOobject*> storedObjects;
             // Read objects in time directory
             IOobjectList objects(mesh, runTime.timeName());
             // Read Fields
-            readFields<volScalarField>(mesh, objects, selectedFieldNames, storedObjects);
+            readFields<volScalarField>(mesh, objects, selectedScalarFields, storedObjects);
+            readFields<volVectorField>(mesh, objects, selectedVectorFields, storedObjects);
 
             Switch contamination = false;
-            forAll (selectedFieldNames, fieldI)
+            forAll (selectedScalarFields, fieldI)
             {
-                if (!mesh.objectRegistry::foundObject<volScalarField>(selectedFieldNames[fieldI]))
+                if (!mesh.objectRegistry::foundObject<volScalarField>(selectedScalarFields[fieldI]))
                 {
                     contamination = true;
+                    Info<< selectedScalarFields[fieldI] << " not found" << endl;
+                }
+            }
+            forAll (selectedVectorFields, fieldI)
+            {
+                if (!mesh.objectRegistry::foundObject<volVectorField>(selectedVectorFields[fieldI]))
+                {
+                    contamination = true;
+                    Info<< selectedVectorFields[fieldI] << " not found" << endl;
                 }
             }
             if (contamination)
@@ -229,22 +237,32 @@ int main(int argc, char *argv[])
                 {
                     storedObjects.pop()->checkOut();
                 }
-                Info << "At least one of the Eulerian scalarFields is missing "
-                     << nl << "break the time loops" << endl;
+                Info << "At least one of the Eulerian fields is missing, "
+                     << nl << "break current time loop!" << endl;
                 continue;
             }
 
-            PtrList<volScalarField> allFields(selectedFieldNames.size());
-            forAll(allFields, fieldI)
+            PtrList<volScalarField> allScalarFields(selectedScalarFields.size());
+            forAll(allScalarFields, fieldI)
             {
-                allFields.set(fieldI, mesh.objectRegistry::lookupObject<volScalarField>(selectedFieldNames[fieldI]) );
-                allFields[fieldI].writeMinMax(Info);
+                allScalarFields.set(fieldI, mesh.objectRegistry::lookupObject<volScalarField>(selectedScalarFields[fieldI]) );
+                allScalarFields[fieldI].writeMinMax(Info);
+            }
+            PtrList<volVectorField> allVectorFields(selectedVectorFields.size());
+            forAll(allVectorFields, fieldI)
+            {
+                allVectorFields.set(fieldI, mesh.objectRegistry::lookupObject<volVectorField>(selectedVectorFields[fieldI]) );
+                allVectorFields[fieldI].writeMinMax(Info);
             }
 
             fileName outputFile = outputPath/fileName("Eulerian");
-            forAll (selectedFieldNames, fieldI)
+            forAll (selectedScalarFields, fieldI)
             {
-                outputFile = outputFile + '_' + selectedFieldNames[fieldI];
+                outputFile = outputFile + '_' + selectedScalarFields[fieldI];
+            }
+            forAll (selectedVectorFields, fieldI)
+            {
+                outputFile = outputFile + '_' + selectedVectorFields[fieldI];
             }
             Info<< "outputFile =" << outputFile << endl;
             OFstream foam2Columns(outputFile);
@@ -253,23 +271,36 @@ int main(int argc, char *argv[])
                 << "x" << "\t"
                 << "y" << "\t"
                 << "z" ;
-            forAll (selectedFieldNames, fieldI)
+            forAll (selectedScalarFields, fieldI)
             {
-                foam2Columns << "\t" << selectedFieldNames[fieldI];
+                foam2Columns << "\t" << selectedScalarFields[fieldI];
             }
-
+            forAll (selectedVectorFields, fieldI)
+            {
+                foam2Columns
+                    << "\t" << selectedVectorFields[fieldI] << "_x"
+                    << "\t" << selectedVectorFields[fieldI] << "_y"
+                    << "\t" << selectedVectorFields[fieldI] << "_z";
+            }
             foam2Columns << endl;
 
-            forAll (allFields[0], cellI)
+            forAll (allScalarFields[0], cellI)
             {
                 foam2Columns
                     << mesh.C()[cellI].component(0) << "\t"
                     << mesh.C()[cellI].component(1) << "\t"
                     << mesh.C()[cellI].component(2);
 
-                forAll(allFields, fieldI)
+                forAll(allScalarFields, fieldI)
                 {
-                    foam2Columns << "\t" << allFields[fieldI][cellI];
+                    foam2Columns << "\t" << allScalarFields[fieldI][cellI];
+                }
+                forAll(allVectorFields, fieldI)
+                {
+                    foam2Columns
+                        << "\t" << allVectorFields[fieldI][cellI].component(0)
+                        << "\t" << allVectorFields[fieldI][cellI].component(1)
+                        << "\t" << allVectorFields[fieldI][cellI].component(2);
                 }
                 foam2Columns << endl;
             }
