@@ -146,7 +146,7 @@ int main(int argc, char *argv[])
                     {
                         foam2ColumnsLagrangian << "\t" << selectedLagrangianFields[fieldI];
                     }
-                    foam2ColumnsLagrangian << endl;
+                    foam2ColumnsLagrangian << nl;
 
                     PtrList<IOField<scalar>> allLagrangianFields(selectedLagrangianFields.size());
                     forAll(selectedLagrangianFields, fieldI)
@@ -196,7 +196,7 @@ int main(int argc, char *argv[])
                         {
                             foam2ColumnsLagrangian << "\t" << allLagrangianFields[fieldI][iParticle];
                         }
-                        foam2ColumnsLagrangian << endl;
+                        foam2ColumnsLagrangian << nl;
                         iParticle ++;
                     }
                 }
@@ -282,7 +282,7 @@ int main(int argc, char *argv[])
                     << "\t" << selectedVectorFields[fieldI] << "_y"
                     << "\t" << selectedVectorFields[fieldI] << "_z";
             }
-            foam2Columns << endl;
+            foam2Columns << nl;
 
             forAll (allScalarFields[0], cellI)
             {
@@ -302,7 +302,7 @@ int main(int argc, char *argv[])
                         << "\t" << allVectorFields[fieldI][cellI].component(1)
                         << "\t" << allVectorFields[fieldI][cellI].component(2);
                 }
-                foam2Columns << endl;
+                foam2Columns << nl;
             }
 
             while (!storedObjects.empty())
