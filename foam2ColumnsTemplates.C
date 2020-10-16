@@ -31,7 +31,7 @@ Foam::validFields
     const IOobjectList& objsList
 )
 {
-    hashedWordList validFieldNames(0);
+    hashedWordList validFieldNames;
     IOobjectList objects
     (
         objsList.lookupClass
@@ -51,6 +51,7 @@ Foam::validFields
     return validFieldNames;
 }
 
+
 template<template<typename> typename tmpType>
 HashTable<label, word>
 Foam::validFields
@@ -60,7 +61,6 @@ Foam::validFields
 )
 {
     HashTable<label, word> validFieldComponents;
-
     // Extract the fields name list        
     const hashedWordList scalarFieldNames = 
     validFields<scalar, tmpType>(fieldNames, objsList);
@@ -108,87 +108,6 @@ Foam::validFields
 }
 
 
-
-
-
-template<class Type>
-void Foam::readField
-(
-    List<Type>& values,
-    const word& fieldName,
-    const IOobjectList& objsList
-)
-{
-    IOobjectList objects(objsList.lookupClass(IOField<Type>::typeName));
-
-    const IOobject* obj = objects.lookup(fieldName);
-    if (obj != nullptr)
-    {
-        IOField<Type> newField(*obj);
-        values = newField;
-    }
-    else
-    {
-        FatalErrorInFunction
-            << "Unable to read field " << fieldName
-            << abort(FatalError);
-    }
-}
-
-
-template<class Type>
-void Foam::readFields
-(
-    const IOobjectList& objects,
-    const HashSet<word>& selectedFields,
-    LIFOStack<regIOobject*>& storedObjects
-)
-{
-    IOobjectList fields(objects.lookupClass(IOField<Type>::typeName));
-
-    if (!fields.size()) return;
-
-    bool firstField = true;
-
-    forAllConstIter(IOobjectList, fields, fieldIter)
-    {
-        const IOobject& io = *fieldIter();
-        const word& fieldName = io.name();
-
-        if (selectedFields.found(fieldName))
-        {
-            if (firstField)
-            {
-                Info<< "    " << IOField<Type>::typeName << "s:";
-                firstField = false;
-            }
-
-            Info<< " " << fieldName;
-
-            IOField<Type>* fieldPtr = new IOField<Type>
-            (
-                IOobject
-                (
-                    fieldName,
-                    io.instance(),
-                    io.local(),
-                    io.db(),
-                    IOobject::MUST_READ,
-                    IOobject::NO_WRITE
-                )
-            );
-            fieldPtr->store();
-            storedObjects.push(fieldPtr);
-        }
-    }
-
-    if (!firstField)
-    {
-        Info<< endl;
-    }
-}
-
-
 template<class Type>
 void Foam::writeValue(OFstream& os, word sep, const scalar& value)
 {
@@ -204,50 +123,26 @@ void Foam::writeValue(OFstream& os, word sep, const Type& value)
     }
 }
 
-template<class Type>
-void Foam::processField
+
+template<class Type, template<typename> typename tmpType>
+List<Type> Foam::readData
 (
-    OFstream& os,
-    const word& validFieldName,
-    const IOobjectList& objsList
+	const IOobject& obj,
+    const volMesh::Mesh& mesh
 )
 {
-    const IOobject* obj = objsList.lookup(validFieldName);
-        
-    List<Type> values;
-    readField<Type>
-    (
-        values,
-        validFieldName,
-        objsList
-    );
-}
-
-template<class Type>
-void Foam::constructFile(const wordList& fieldNames, word& sortedExtensions, wordList& sortedHeader)
-{
-    forAll(fieldNames, fieldI)
+    if(tmpType<Type>::typeName == VolFieldType<Type>::typeName)
     {
-        const word fieldName = fieldNames[fieldI];
-        if(pTraits<Type>::nComponents==1)
-        {
-            sortedHeader.append(fieldName);
-        }
-        else
-        {
-            for (label i=0; i<pTraits<Type>::nComponents; i++)
-            {
-                sortedHeader.append(fieldName + "_" + name(i));
-            }
-        }
-        sortedExtensions = sortedExtensions + "_" + fieldName;
+        return VolFieldType<Type>(obj, mesh);
     }
+    return IOField<Type>(obj);
 }
 
 
 template<template<typename> typename tmpType>
 void Foam::readDatas
 (
+    const volMesh::Mesh& mesh,
 	const IOobjectList& objects,
 	const wordList& selectedFields,
 	PtrList<List<scalar>>& data
@@ -267,76 +162,77 @@ void Foam::readDatas
 	label nColumns(0);
 	forAll(selectedFields, fieldI)
 	{
-		const word fieldName = selectedFields[fieldI];
-		const IOobject* obj = objects.lookup(fieldName);
+		const word& fieldName = selectedFields[fieldI];
+		const IOobject& obj = *objects.lookup(fieldName);
+
 		if(scalarFieldNames.found(fieldName))
 		{
-			tmpType<scalar> tmpField(*obj);
+            List<scalar> tmpField = readData<scalar, tmpType>(obj, mesh);
 			data.set(nColumns, new List<scalar>(tmpField.size()));
 			forAll(tmpField, cellI)
 			{
-				data[cellI][nColumns] = tmpField[cellI];
+				data[nColumns][cellI] = tmpField[cellI];
 			}
 			nColumns++;
 		}
 		else if(vectorFieldNames.found(fieldName))
 		{
-			tmpType<vector> tmpField(*obj);
+            List<vector> tmpField = readData<vector, tmpType>(obj, mesh);
 			for (label i=0; i<pTraits<vector>::nComponents; i++)
 			{
 				data.set(nColumns, new List<scalar>(tmpField.size()));
 				forAll(tmpField, cellI)
 				{
-					data[cellI][nColumns] = tmpField[cellI].component(i);
+					data[nColumns][cellI] = tmpField[cellI].component(i);
 				}
 				nColumns++;
 			}
 		}
 		else if(sphericalTensorFieldNames.found(fieldName))
 		{
-			tmpType<sphericalTensor> tmpField(*obj);
+            List<sphericalTensor> tmpField = readData<sphericalTensor, tmpType>(obj, mesh);
 			for (label i=0; i<pTraits<sphericalTensor>::nComponents; i++)
 			{
 				data.set(nColumns, new List<scalar>(tmpField.size()));
 				forAll(tmpField, cellI)
 				{
-					data[cellI][nColumns] = tmpField[cellI].component(i);
+					data[nColumns][cellI] = tmpField[cellI].component(i);
 				}
 				nColumns++;
 			}
 		}
 		else if(symmTensorFieldNames.found(fieldName))
 		{
-			tmpType<symmTensor> tmpField(*obj);
+            List<symmTensor> tmpField = readData<symmTensor, tmpType>(obj, mesh);
 			for (label i=0; i<pTraits<symmTensor>::nComponents; i++)
 			{
 				data.set(nColumns, new List<scalar>(tmpField.size()));
 				forAll(tmpField, cellI)
 				{
-					data[cellI][nColumns] = tmpField[cellI].component(i);
+					data[nColumns][cellI] = tmpField[cellI].component(i);
 				}
 				nColumns++;
 			}
 		}
 		else if(tensorFieldNames.found(fieldName))
 		{
-			tmpType<tensor> tmpField(*obj);
+            List<tensor> tmpField = readData<tensor, tmpType>(obj, mesh);
 			for (label i=0; i<pTraits<tensor>::nComponents; i++)
 			{
 				data.set(nColumns, new List<scalar>(tmpField.size()));
 				forAll(tmpField, cellI)
 				{
-					data[cellI][nColumns] = tmpField[cellI].component(i);
+					data[nColumns][cellI] = tmpField[cellI].component(i);
 				}
 				nColumns++;
 			}
 		}
-		else
-		{
-			Info << "At least one of the Lagrangian fields is missing, "
-				 << nl << "break current time loop!" << endl;
-			continue;	
-		}
+        else
+        {
+            FatalErrorInFunction
+                << "Unable to read field " << fieldName
+                << abort(FatalError);
+        }
 	}
 }
 

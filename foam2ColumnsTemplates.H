@@ -33,6 +33,9 @@ License
 namespace Foam
 {
 
+template<typename Type>
+using VolFieldType = GeometricField<Type, fvPatchField, volMesh>;
+
 template<class Type, template<typename> typename tmpType>
 hashedWordList validFields
 (
@@ -48,48 +51,26 @@ HashTable<label, word> validFields
 );
 
 template<class Type>
-void constructFile(const wordList& fieldNames, word& sortedExtensions, wordList& sortedHeader);
-
-template<class Type>
 void writeValue(OFstream& os, word sep, const scalar& value);
 
 template<class Type>
 void writeValue(OFstream& os, const Type& value);
 
-template<class Type>
-void readField
+template<class Type, template<typename> typename tmpType>
+List<Type> readData
 (
-    List<Type>& values,
-    const word& fieldName,
-    const IOobjectList& cloudObjs
+	const IOobject& obj,
+    const volMesh::Mesh& mesh
 );
-template<class Type>
-void readFields
-(
-    const IOobjectList& objects,
-    const HashSet<word>& selectedFields,
-    LIFOStack<regIOobject*>& storedObjects
-);
-
-template<class Type>
-void processField
-(
-    OFstream& os,
-    const word& fieldName,
-    const IOobjectList& objsList
-);
-
 
 template<template<typename> typename Type>
 void readDatas
 (
+    const volMesh::Mesh& mesh,
     const IOobjectList& objects,
     const wordList& selectedFields,
     PtrList<List<scalar>>& data
 );
-
-template<typename Type>
-using VolFieldType = GeometricField<Type, fvPatchField, volMesh>;
 
 } // End namespace Foam
 
