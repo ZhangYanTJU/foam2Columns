@@ -33,7 +33,7 @@ Description
 #include "ReadFields.H" // for the define of class::IOobjectList and function::readFields
 #include "cloud.H" //cloud::prefix
 #include "passiveParticleCloud.H"
-
+#include "foam2ColumnsTemplates.H"
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 int main(int argc, char *argv[])
 {
@@ -43,14 +43,7 @@ int main(int argc, char *argv[])
     (
         "fields",
         "list",
-        "specify a list of volScalarFields to be processed. Eg, '(p T)' - "
-        "regular expressions not currently supported"
-    );
-    argList::addOption
-    (
-        "vectorFields",
-        "list",
-        "specify a list of volVectorFields to be processed. Eg, '(U)' - "
+        "specify a list of volFields to be processed. Eg, '(p U T)' - "
         "regular expressions not currently supported"
     );
     argList::addOption
@@ -68,15 +61,10 @@ int main(int argc, char *argv[])
 
     instantList timeDirs = timeSelector::select0(runTime, args);
 
-    List<word> selectedScalarFields;
+    List<word> selectedEulerianFields;
     if (args.optionFound("fields"))
     {
-        args.optionLookup("fields")() >> selectedScalarFields;
-    }
-    List<word> selectedVectorFields;
-    if (args.optionFound("vectorFields"))
-    {
-        args.optionLookup("vectorFields")() >> selectedVectorFields;
+        args.optionLookup("fields")() >> selectedEulerianFields;
     }
     List<word> selectedLagrangianFields;
     if (args.optionFound("lagrangianFields"))
@@ -94,7 +82,7 @@ int main(int argc, char *argv[])
         mkDir(outputPath);
         #include "createMesh.H"
         Info<< "mesh.nCells() = " << mesh.nCells() << endl;
-
+        const word sep = "\t";
         // For Lagrangian scalarFields foam2Columns
         if(selectedLagrangianFields.size())
         {
@@ -115,9 +103,9 @@ int main(int argc, char *argv[])
                 fileName dir(cloud::prefix/cloudDirs[i]);
 
                 // Do local scan for valid cloud objects
-                IOobjectList sprayObjs(runTime, runTime.timeName(), dir);
+                IOobjectList objects(runTime, runTime.timeName(), dir);
 
-                if (sprayObjs.found(word("positions")))
+                if (objects.found(word("positions")))
                 {
                     const word cloudName = cloudDirs[i];
 
@@ -127,55 +115,138 @@ int main(int argc, char *argv[])
                     fileName outputFile = outputPath/fileName("Lagrangian");
                     outputFile = outputFile + '_' + cloudName;
 
-                    forAll (selectedLagrangianFields, fieldI)
+                    // Extract the fields name list        
+                    const hashedWordList scalarFieldNames = 
+                    validFields<scalar, IOField>
+                    (selectedLagrangianFields, objects);
+                    const hashedWordList vectorFieldNames = 
+                    validFields<vector, IOField>
+                    (selectedLagrangianFields, objects);
+                    const hashedWordList sphericalTensorFieldNames = 
+                    validFields<sphericalTensor, IOField>
+                    (selectedLagrangianFields, objects);
+                    const hashedWordList symmTensorFieldNames =
+                    validFields<symmTensor, IOField>
+                    (selectedLagrangianFields, objects);
+                    const hashedWordList tensorFieldNames = 
+                    validFields<tensor, IOField>
+                    (selectedLagrangianFields, objects);
+
+
+                    HashTable<label> validFieldComponents = validFields<IOField>(selectedLagrangianFields, objects);
+                   
+                 
+                    // check completeness
+                    if ( validFieldComponents.size() < selectedLagrangianFields.size())
                     {
-                        outputFile = outputFile + '_' + selectedLagrangianFields[fieldI];
+                        Info << "At least one of the Lagrangian fields is missing, "
+                             << nl << "break current time loop!" << endl;
+                        continue;
                     }
+
+
+
+                    wordList sortedHeader(0);
+                    word sortedExtensions("");
+
+/*
+HashTable<using> aaa;
+using typeName = scalar;
+using typeName = scalar;//typename typeNameTmp;
+*/
+                    forAll(selectedLagrangianFields, fieldI)
+                    {
+                        const word fieldName = selectedLagrangianFields[fieldI];
+                        const label nComponents = validFieldComponents[fieldName];
+                        for (label i=0; i<nComponents; i++)
+                        {
+                            sortedHeader.append(fieldName + "_" + name(i));
+                        }
+                        outputFile = outputFile + "_" + fieldName;
+                    }
+
+
+
+
+
+                    constructFile<scalar>(scalarFieldNames, sortedExtensions, sortedHeader);
+                    constructFile<vector>(vectorFieldNames, sortedExtensions, sortedHeader);
+                    constructFile<sphericalTensor>(sphericalTensorFieldNames, sortedExtensions, sortedHeader);
+                    constructFile<symmTensor>(symmTensorFieldNames, sortedExtensions, sortedHeader);
+                    constructFile<tensor>(tensorFieldNames, sortedExtensions, sortedHeader);
+
+PtrList<List<scalar>> data(sortedHeader.size());
+readDatas<IOField>(objects, selectedLagrangianFields, data);
+
+                    outputFile = outputFile + sortedExtensions;
 
                     Info<< "outputFile =" << outputFile << endl;
                     OFstream foam2ColumnsLagrangian(outputFile);
 
                     foam2ColumnsLagrangian
-                        << "x" << "\t"
-                        << "y" << "\t"
-                        << "z" << "\t"
-                        << "origId" << "\t"
+                        << "x" << sep
+                        << "y" << sep
+                        << "z" << sep
+                        << "origId" << sep
                         << "origProc";
 
-                    forAll (selectedLagrangianFields, fieldI)
+                    forAll(sortedHeader, iHeader)
                     {
-                        foam2ColumnsLagrangian << "\t" << selectedLagrangianFields[fieldI];
+                        foam2ColumnsLagrangian << sep << sortedHeader[iHeader];
                     }
+
                     foam2ColumnsLagrangian << nl;
 
-                    PtrList<IOField<scalar>> allLagrangianFields(selectedLagrangianFields.size());
-                    forAll(selectedLagrangianFields, fieldI)
+                    PtrList<Field<scalar>> allScalarFields(scalarFieldNames.size());
+                    forAll(allScalarFields, fieldI)
                     {
-                        const word fieldName = selectedLagrangianFields[fieldI];
-
-                        // Check object on local mesh
-                        IOobject fieldIOobject
+                        readField<scalar>
                         (
-                            fieldName,
-                            runTime.timeName(),
-                            dir,
-                            mesh,
-                            IOobject::MUST_READ,
-                            IOobject::NO_WRITE
+                            allScalarFields[fieldI],
+                            scalarFieldNames[fieldI],
+                            objects
                         );
+                    }
 
-                        if (fieldIOobject.typeHeaderOk<IOField<scalar>>(true))
-                        {
-                            allLagrangianFields.set
-                            (
-                                fieldI,
-                                new
-                                IOField<scalar>
-                                (
-                                    fieldIOobject
-                                )
-                            );
-                        }
+                    PtrList<Field<vector>> allVectorFields(vectorFieldNames.size());
+                    forAll(allVectorFields, fieldI)
+                    {
+                        readField<vector>
+                        (
+                            allVectorFields[fieldI],
+                            vectorFieldNames[fieldI],
+                            objects
+                        );
+                    }
+                    PtrList<Field<sphericalTensor>> allSphericalTensorFields(sphericalTensorFieldNames.size());
+                    forAll(allSphericalTensorFields, fieldI)
+                    {
+                        readField<sphericalTensor>
+                        (
+                            allSphericalTensorFields[fieldI],
+                            sphericalTensorFieldNames[fieldI],
+                            objects
+                        );
+                    }
+                    PtrList<Field<symmTensor>> allSymmTensorFields(symmTensorFieldNames.size());
+                    forAll(allSymmTensorFields, fieldI)
+                    {
+                        readField<symmTensor>
+                        (
+                            allSymmTensorFields[fieldI],
+                            symmTensorFieldNames[fieldI],
+                            objects
+                        );
+                    }
+                    PtrList<Field<tensor>> allTensorFields(tensorFieldNames.size());
+                    forAll(allTensorFields, fieldI)
+                    {
+                        readField<tensor>
+                        (
+                            allTensorFields[fieldI],
+                            tensorFieldNames[fieldI],
+                            objects
+                        );
                     }
 
                     passiveParticleCloud parcels(mesh, cloudDirs[i]);
@@ -186,16 +257,35 @@ int main(int argc, char *argv[])
                         const passiveParticle& ppi = iter();
 
                         foam2ColumnsLagrangian
-                            << ppi.position().component(0) << "\t"
-                            << ppi.position().component(1) << "\t"
-                            << ppi.position().component(2) << "\t"
-                            << ppi.origId() << "\t"
+                            << ppi.position().component(0) << sep
+                            << ppi.position().component(1) << sep
+                            << ppi.position().component(2) << sep
+                            << ppi.origId() << sep
                             << ppi.origProc();
+
                         label iParticle(0);
-                        forAll(allLagrangianFields, fieldI)
+
+                        forAll(allScalarFields, fieldI)
                         {
-                            foam2ColumnsLagrangian << "\t" << allLagrangianFields[fieldI][iParticle];
+                            writeValue<scalar>(foam2ColumnsLagrangian, sep, allScalarFields[fieldI][iParticle]);
                         }
+                        forAll(allVectorFields, fieldI)
+                        {
+                            writeValue<vector>(foam2ColumnsLagrangian, sep, allVectorFields[fieldI][iParticle]);
+                        }
+                        forAll(allSphericalTensorFields, fieldI)
+                        {
+                            writeValue<sphericalTensor>(foam2ColumnsLagrangian, sep, allSphericalTensorFields[fieldI][iParticle]);
+                        }
+                        forAll(allSymmTensorFields, fieldI)
+                        {
+                            writeValue<symmTensor>(foam2ColumnsLagrangian, sep, allSymmTensorFields[fieldI][iParticle]);
+                        }
+                        forAll(allTensorFields, fieldI)
+                        {
+                            writeValue<tensor>(foam2ColumnsLagrangian, sep, allTensorFields[fieldI][iParticle]);
+                        }
+
                         foam2ColumnsLagrangian << nl;
                         iParticle ++;
                     }
@@ -204,34 +294,47 @@ int main(int argc, char *argv[])
         }
 
         // For Eulerian scalarFields foam2Columns
-        if(selectedScalarFields.size()||selectedVectorFields.size())
+        if(selectedEulerianFields.size())
         {
-            // Maintain a stack of the stored objects to clear after executing
-            LIFOStack<regIOobject*> storedObjects;
+            fileName outputFile = outputPath/fileName("Eulerian");
+
             // Read objects in time directory
             IOobjectList objects(mesh, runTime.timeName());
-            // Read Fields
-            readFields<volScalarField>(mesh, objects, selectedScalarFields, storedObjects);
-            readFields<volVectorField>(mesh, objects, selectedVectorFields, storedObjects);
 
-            Switch contamination = false;
-            forAll (selectedScalarFields, fieldI)
-            {
-                if (!mesh.objectRegistry::foundObject<volScalarField>(selectedScalarFields[fieldI]))
-                {
-                    contamination = true;
-                    Info<< selectedScalarFields[fieldI] << " not found" << endl;
-                }
-            }
-            forAll (selectedVectorFields, fieldI)
-            {
-                if (!mesh.objectRegistry::foundObject<volVectorField>(selectedVectorFields[fieldI]))
-                {
-                    contamination = true;
-                    Info<< selectedVectorFields[fieldI] << " not found" << endl;
-                }
-            }
-            if (contamination)
+            // Extract the fields name list        
+            const hashedWordList scalarFieldNames = 
+            validFields<scalar, VolFieldType>
+            (selectedEulerianFields, objects);
+            const hashedWordList vectorFieldNames = 
+            validFields<vector, VolFieldType>
+            (selectedEulerianFields, objects);
+            const hashedWordList sphericalTensorFieldNames = 
+            validFields<sphericalTensor, VolFieldType>
+            (selectedEulerianFields, objects);
+            const hashedWordList symmTensorFieldNames =
+            validFields<symmTensor, VolFieldType>
+            (selectedEulerianFields, objects);
+            const hashedWordList tensorFieldNames = 
+            validFields<tensor, VolFieldType>
+            (selectedEulerianFields, objects);
+
+            // Maintain a stack of the stored objects to clear after executing
+            LIFOStack<regIOobject*> storedObjects;
+
+            // Read Fields
+            readFields<volScalarField>
+            (mesh, objects, scalarFieldNames, storedObjects);
+            readFields<volVectorField>
+            (mesh, objects, vectorFieldNames, storedObjects);
+            readFields<volSphericalTensorField>
+            (mesh, objects, sphericalTensorFieldNames, storedObjects);
+            readFields<volSymmTensorField>
+            (mesh, objects, symmTensorFieldNames, storedObjects);
+            readFields<volTensorField>
+            (mesh, objects, tensorFieldNames, storedObjects);
+
+            // check completeness
+            if ( storedObjects.size() < selectedEulerianFields.size())
             {
                 while (!storedObjects.empty())
                 {
@@ -242,67 +345,100 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            PtrList<volScalarField> allScalarFields(selectedScalarFields.size());
+            wordList sortedHeader(0);
+            word sortedExtensions("");
+
+            constructFile<scalar>(scalarFieldNames, sortedExtensions, sortedHeader);
+            constructFile<vector>(vectorFieldNames, sortedExtensions, sortedHeader);
+            constructFile<sphericalTensor>(sphericalTensorFieldNames, sortedExtensions, sortedHeader);
+            constructFile<symmTensor>(symmTensorFieldNames, sortedExtensions, sortedHeader);
+            constructFile<tensor>(tensorFieldNames, sortedExtensions, sortedHeader);
+
+
+PtrList<List<scalar>> data(sortedHeader.size());
+//readDatas<VolFieldType>(objects, selectedEulerianFields, data);
+readDatas<IOField>(objects, selectedEulerianFields, data);
+
+
+
+
+            outputFile = outputFile + sortedExtensions;
+
+            Info<< "outputFile =" << outputFile << endl;
+            OFstream foam2ColumnsEulerian(outputFile);
+
+            foam2ColumnsEulerian
+                << "x" << sep
+                << "y" << sep
+                << "z" ;
+
+            forAll(sortedHeader, iHeader)
+            {
+                foam2ColumnsEulerian << sep << sortedHeader[iHeader];
+            }
+
+            foam2ColumnsEulerian << nl;
+
+            PtrList<volScalarField> allScalarFields(scalarFieldNames.size());
             forAll(allScalarFields, fieldI)
             {
-                allScalarFields.set(fieldI, mesh.objectRegistry::lookupObject<volScalarField>(selectedScalarFields[fieldI]) );
+                allScalarFields.set(fieldI, mesh.objectRegistry::lookupObject<volScalarField>(scalarFieldNames[fieldI]) );
                 allScalarFields[fieldI].writeMinMax(Info);
             }
-            PtrList<volVectorField> allVectorFields(selectedVectorFields.size());
+            PtrList<volVectorField> allVectorFields(vectorFieldNames.size());
             forAll(allVectorFields, fieldI)
             {
-                allVectorFields.set(fieldI, mesh.objectRegistry::lookupObject<volVectorField>(selectedVectorFields[fieldI]) );
+                allVectorFields.set(fieldI, mesh.objectRegistry::lookupObject<volVectorField>(vectorFieldNames[fieldI]) );
                 allVectorFields[fieldI].writeMinMax(Info);
             }
+            PtrList<volSphericalTensorField> allSphericalTensorFields(sphericalTensorFieldNames.size());
+            forAll(allSphericalTensorFields, fieldI)
+            {
+                allSphericalTensorFields.set(fieldI, mesh.objectRegistry::lookupObject<volSphericalTensorField>(sphericalTensorFieldNames[fieldI]) );
+                allSphericalTensorFields[fieldI].writeMinMax(Info);
+            }
+            PtrList<volSymmTensorField> allSymmTensorFields(symmTensorFieldNames.size());
+            forAll(allSymmTensorFields, fieldI)
+            {
+                allSymmTensorFields.set(fieldI, mesh.objectRegistry::lookupObject<volSymmTensorField>(symmTensorFieldNames[fieldI]) );
+                allSymmTensorFields[fieldI].writeMinMax(Info);
+            }
+            PtrList<volTensorField> allTensorFields(tensorFieldNames.size());
+            forAll(allTensorFields, fieldI)
+            {
+                allTensorFields.set(fieldI, mesh.objectRegistry::lookupObject<volTensorField>(tensorFieldNames[fieldI]) );
+                allTensorFields[fieldI].writeMinMax(Info);
+            }
 
-            fileName outputFile = outputPath/fileName("Eulerian");
-            forAll (selectedScalarFields, fieldI)
+            forAll(mesh.C(), cellI)
             {
-                outputFile = outputFile + '_' + selectedScalarFields[fieldI];
-            }
-            forAll (selectedVectorFields, fieldI)
-            {
-                outputFile = outputFile + '_' + selectedVectorFields[fieldI];
-            }
-            Info<< "outputFile =" << outputFile << endl;
-            OFstream foam2Columns(outputFile);
-
-            foam2Columns
-                << "x" << "\t"
-                << "y" << "\t"
-                << "z" ;
-            forAll (selectedScalarFields, fieldI)
-            {
-                foam2Columns << "\t" << selectedScalarFields[fieldI];
-            }
-            forAll (selectedVectorFields, fieldI)
-            {
-                foam2Columns
-                    << "\t" << selectedVectorFields[fieldI] << "_x"
-                    << "\t" << selectedVectorFields[fieldI] << "_y"
-                    << "\t" << selectedVectorFields[fieldI] << "_z";
-            }
-            foam2Columns << nl;
-
-            forAll (allScalarFields[0], cellI)
-            {
-                foam2Columns
-                    << mesh.C()[cellI].component(0) << "\t"
-                    << mesh.C()[cellI].component(1) << "\t"
+                foam2ColumnsEulerian
+                    << mesh.C()[cellI].component(0) << sep
+                    << mesh.C()[cellI].component(1) << sep
                     << mesh.C()[cellI].component(2);
 
                 forAll(allScalarFields, fieldI)
                 {
-                    foam2Columns << "\t" << allScalarFields[fieldI][cellI];
+                    writeValue<scalar>(foam2ColumnsEulerian, sep, allScalarFields[fieldI][cellI]);
                 }
                 forAll(allVectorFields, fieldI)
                 {
-                    foam2Columns
-                        << "\t" << allVectorFields[fieldI][cellI].component(0)
-                        << "\t" << allVectorFields[fieldI][cellI].component(1)
-                        << "\t" << allVectorFields[fieldI][cellI].component(2);
+                    writeValue<vector>(foam2ColumnsEulerian, sep, allVectorFields[fieldI][cellI]);
                 }
-                foam2Columns << nl;
+                forAll(allSphericalTensorFields, fieldI)
+                {
+                    writeValue<sphericalTensor>(foam2ColumnsEulerian, sep, allSphericalTensorFields[fieldI][cellI]);
+                }
+                forAll(allSymmTensorFields, fieldI)
+                {
+                    writeValue<symmTensor>(foam2ColumnsEulerian, sep, allSymmTensorFields[fieldI][cellI]);
+                }
+                forAll(allTensorFields, fieldI)
+                {
+                    writeValue<tensor>(foam2ColumnsEulerian, sep, allTensorFields[fieldI][cellI]);
+                }
+
+                foam2ColumnsEulerian << nl;
             }
 
             while (!storedObjects.empty())
