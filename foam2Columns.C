@@ -37,6 +37,7 @@ Description
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 int main(int argc, char *argv[])
 {
+    argList::noParallel();
     #include "removeCaseOptions.H"
     timeSelector::addOptions();
     argList::addOption
