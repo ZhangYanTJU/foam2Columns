@@ -33,7 +33,7 @@ Description
 #include "ReadFields.H" // for the define of class::IOobjectList and function::readFields
 #include "cloud.H" //cloud::prefix
 #include "passiveParticleCloud.H"
-
+#include "foam2ColumnsTemplates.H"
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 int main(int argc, char *argv[])
 {
@@ -44,14 +44,7 @@ int main(int argc, char *argv[])
     (
         "fields",
         "list",
-        "specify a list of volScalarFields to be processed. Eg, '(p T)' - "
-        "regular expressions not currently supported"
-    );
-    argList::addOption
-    (
-        "vectorFields",
-        "list",
-        "specify a list of volVectorFields to be processed. Eg, '(U)' - "
+        "specify a list of volFields to be processed. Eg, '(p U T)' - "
         "regular expressions not currently supported"
     );
     argList::addOption
@@ -69,15 +62,10 @@ int main(int argc, char *argv[])
 
     instantList timeDirs = timeSelector::select0(runTime, args);
 
-    List<word> selectedScalarFields;
+    List<word> selectedEulerianFields;
     if (args.optionFound("fields"))
     {
-        args.optionLookup("fields")() >> selectedScalarFields;
-    }
-    List<word> selectedVectorFields;
-    if (args.optionFound("vectorFields"))
-    {
-        args.optionLookup("vectorFields")() >> selectedVectorFields;
+        args.optionLookup("fields")() >> selectedEulerianFields;
     }
     List<word> selectedLagrangianFields;
     if (args.optionFound("lagrangianFields"))
@@ -95,7 +83,7 @@ int main(int argc, char *argv[])
         mkDir(outputPath);
         #include "createMesh.H"
         Info<< "mesh.nCells() = " << mesh.nCells() << endl;
-
+        const word sep = "\t";
         // For Lagrangian scalarFields foam2Columns
         if(selectedLagrangianFields.size())
         {
@@ -116,9 +104,9 @@ int main(int argc, char *argv[])
                 fileName dir(cloud::prefix/cloudDirs[i]);
 
                 // Do local scan for valid cloud objects
-                IOobjectList sprayObjs(runTime, runTime.timeName(), dir);
+                IOobjectList objects(runTime, runTime.timeName(), dir);
 
-                if (sprayObjs.found(word("positions")))
+                if (objects.found(word("positions")))
                 {
                     const word cloudName = cloudDirs[i];
 
@@ -128,75 +116,84 @@ int main(int argc, char *argv[])
                     fileName outputFile = outputPath/fileName("Lagrangian");
                     outputFile = outputFile + '_' + cloudName;
 
-                    forAll (selectedLagrangianFields, fieldI)
+                    // Extract the fields name list and the number of Components
+                    HashTable<label> validFieldComponents = 
+                    validFields<IOField>(selectedLagrangianFields, objects);
+                 
+                    // check completeness
+                    if ( validFieldComponents.size() < selectedLagrangianFields.size())
                     {
-                        outputFile = outputFile + '_' + selectedLagrangianFields[fieldI];
+                        Info << "At least one of the Lagrangian fields is missing, "
+                             << nl << "break current time loop!" << endl;
+                        continue;
+                    }
+
+                    // Head of writing files, each component has a header
+                    wordList sortedHeader(0);
+
+                    forAll(selectedLagrangianFields, fieldI)
+                    {
+                        const word& fieldName = selectedLagrangianFields[fieldI];
+                        const label& nComponents = validFieldComponents[fieldName];
+                        if( nComponents > 1 )
+                        {
+                            for (label i=0; i<nComponents; i++)
+                            {
+                                sortedHeader.append(fieldName + "_" + name(i));
+                            }
+                        }
+                        else
+                        {
+                            sortedHeader.append(fieldName);
+                        }
+                        outputFile = outputFile + "_" + fieldName;
                     }
 
                     Info<< "outputFile =" << outputFile << endl;
                     OFstream foam2ColumnsLagrangian(outputFile);
 
                     foam2ColumnsLagrangian
-                        << "x" << "\t"
-                        << "y" << "\t"
-                        << "z" << "\t"
-                        << "origId" << "\t"
+                        << "x" << sep
+                        << "y" << sep
+                        << "z" << sep
+                        << "origId" << sep
                         << "origProc";
 
-                    forAll (selectedLagrangianFields, fieldI)
+                    forAll(sortedHeader, iHeader)
                     {
-                        foam2ColumnsLagrangian << "\t" << selectedLagrangianFields[fieldI];
+                        foam2ColumnsLagrangian << sep << sortedHeader[iHeader];
                     }
+
                     foam2ColumnsLagrangian << nl;
 
-                    PtrList<IOField<scalar>> allLagrangianFields(selectedLagrangianFields.size());
-                    forAll(selectedLagrangianFields, fieldI)
-                    {
-                        const word fieldName = selectedLagrangianFields[fieldI];
-
-                        // Check object on local mesh
-                        IOobject fieldIOobject
-                        (
-                            fieldName,
-                            runTime.timeName(),
-                            dir,
-                            mesh,
-                            IOobject::MUST_READ,
-                            IOobject::NO_WRITE
-                        );
-
-                        if (fieldIOobject.typeHeaderOk<IOField<scalar>>(true))
-                        {
-                            allLagrangianFields.set
-                            (
-                                fieldI,
-                                new
-                                IOField<scalar>
-                                (
-                                    fieldIOobject
-                                )
-                            );
-                        }
-                    }
-
+                    PtrList<List<scalar>> dataLagrangian(sortedHeader.size());
+                    readDatas<IOField>(mesh, objects, selectedLagrangianFields, dataLagrangian);
                     passiveParticleCloud parcels(mesh, cloudDirs[i]);
 
+                    label iParticle(0);
                     forAllConstIter(passiveParticleCloud, parcels, iter)
                     {
                         // Loop for each particle
                         const passiveParticle& ppi = iter();
 
                         foam2ColumnsLagrangian
-                            << ppi.position().component(0) << "\t"
-                            << ppi.position().component(1) << "\t"
-                            << ppi.position().component(2) << "\t"
-                            << ppi.origId() << "\t"
+                            << ppi.position().component(0) << sep
+                            << ppi.position().component(1) << sep
+                            << ppi.position().component(2) << sep
+                            << ppi.origId() << sep
                             << ppi.origProc();
-                        label iParticle(0);
-                        forAll(allLagrangianFields, fieldI)
+
+                        forAll(dataLagrangian, columnsI)
                         {
-                            foam2ColumnsLagrangian << "\t" << allLagrangianFields[fieldI][iParticle];
+                            writeValue<scalar>
+                            (
+                                foam2ColumnsLagrangian,
+                                sep,
+                                dataLagrangian[columnsI][iParticle]
+                            );
                         }
+
+                        // Important, must be nl instead of endl, which is much slower
                         foam2ColumnsLagrangian << nl;
                         iParticle ++;
                     }
@@ -205,110 +202,82 @@ int main(int argc, char *argv[])
         }
 
         // For Eulerian scalarFields foam2Columns
-        if(selectedScalarFields.size()||selectedVectorFields.size())
+        if(selectedEulerianFields.size())
         {
-            // Maintain a stack of the stored objects to clear after executing
-            LIFOStack<regIOobject*> storedObjects;
+            fileName outputFile = outputPath/fileName("Eulerian");
+
             // Read objects in time directory
             IOobjectList objects(mesh, runTime.timeName());
-            // Read Fields
-            readFields<volScalarField>(mesh, objects, selectedScalarFields, storedObjects);
-            readFields<volVectorField>(mesh, objects, selectedVectorFields, storedObjects);
 
-            Switch contamination = false;
-            forAll (selectedScalarFields, fieldI)
+            // Extract the fields name list and the number of Components
+            HashTable<label> validFieldComponents = 
+            validFields<VolFieldType>(selectedEulerianFields, objects);
+         
+            // check completeness
+            if ( validFieldComponents.size() < selectedEulerianFields.size())
             {
-                if (!mesh.objectRegistry::foundObject<volScalarField>(selectedScalarFields[fieldI]))
-                {
-                    contamination = true;
-                    Info<< selectedScalarFields[fieldI] << " not found" << endl;
-                }
-            }
-            forAll (selectedVectorFields, fieldI)
-            {
-                if (!mesh.objectRegistry::foundObject<volVectorField>(selectedVectorFields[fieldI]))
-                {
-                    contamination = true;
-                    Info<< selectedVectorFields[fieldI] << " not found" << endl;
-                }
-            }
-            if (contamination)
-            {
-                while (!storedObjects.empty())
-                {
-                    storedObjects.pop()->checkOut();
-                }
                 Info << "At least one of the Eulerian fields is missing, "
                      << nl << "break current time loop!" << endl;
                 continue;
             }
 
-            PtrList<volScalarField> allScalarFields(selectedScalarFields.size());
-            forAll(allScalarFields, fieldI)
+            // Head of writing files, each component has a header
+            wordList sortedHeader(0);
+
+            forAll(selectedEulerianFields, fieldI)
             {
-                allScalarFields.set(fieldI, mesh.objectRegistry::lookupObject<volScalarField>(selectedScalarFields[fieldI]) );
-                allScalarFields[fieldI].writeMinMax(Info);
-            }
-            PtrList<volVectorField> allVectorFields(selectedVectorFields.size());
-            forAll(allVectorFields, fieldI)
-            {
-                allVectorFields.set(fieldI, mesh.objectRegistry::lookupObject<volVectorField>(selectedVectorFields[fieldI]) );
-                allVectorFields[fieldI].writeMinMax(Info);
+                const word& fieldName = selectedEulerianFields[fieldI];
+                const label& nComponents = validFieldComponents[fieldName];
+                if( nComponents > 1 )
+                {
+                    for (label i=0; i<nComponents; i++)
+                    {
+                        sortedHeader.append(fieldName + "_" + name(i));
+                    }
+                }
+                else
+                {
+                    sortedHeader.append(fieldName);
+                }
+                outputFile = outputFile + "_" + fieldName;
             }
 
-            fileName outputFile = outputPath/fileName("Eulerian");
-            forAll (selectedScalarFields, fieldI)
-            {
-                outputFile = outputFile + '_' + selectedScalarFields[fieldI];
-            }
-            forAll (selectedVectorFields, fieldI)
-            {
-                outputFile = outputFile + '_' + selectedVectorFields[fieldI];
-            }
             Info<< "outputFile =" << outputFile << endl;
-            OFstream foam2Columns(outputFile);
+            OFstream foam2ColumnsEulerian(outputFile);
 
-            foam2Columns
-                << "x" << "\t"
-                << "y" << "\t"
+            foam2ColumnsEulerian
+                << "x" << sep
+                << "y" << sep
                 << "z" ;
-            forAll (selectedScalarFields, fieldI)
-            {
-                foam2Columns << "\t" << selectedScalarFields[fieldI];
-            }
-            forAll (selectedVectorFields, fieldI)
-            {
-                foam2Columns
-                    << "\t" << selectedVectorFields[fieldI] << "_x"
-                    << "\t" << selectedVectorFields[fieldI] << "_y"
-                    << "\t" << selectedVectorFields[fieldI] << "_z";
-            }
-            foam2Columns << nl;
 
-            forAll (allScalarFields[0], cellI)
+            forAll(sortedHeader, iHeader)
             {
-                foam2Columns
-                    << mesh.C()[cellI].component(0) << "\t"
-                    << mesh.C()[cellI].component(1) << "\t"
+                foam2ColumnsEulerian << sep << sortedHeader[iHeader];
+            }
+
+            foam2ColumnsEulerian << nl;
+
+            PtrList<List<scalar>> dataEulerian(sortedHeader.size());
+            readDatas<VolFieldType>(mesh, objects, selectedEulerianFields, dataEulerian);
+
+            forAll(mesh.C(), cellI)
+            {
+                foam2ColumnsEulerian
+                    << mesh.C()[cellI].component(0) << sep
+                    << mesh.C()[cellI].component(1) << sep
                     << mesh.C()[cellI].component(2);
 
-                forAll(allScalarFields, fieldI)
+                forAll(dataEulerian, columnsI)
                 {
-                    foam2Columns << "\t" << allScalarFields[fieldI][cellI];
+                    writeValue<scalar>
+                    (
+                        foam2ColumnsEulerian,
+                        sep,
+                        dataEulerian[columnsI][cellI]
+                    );
                 }
-                forAll(allVectorFields, fieldI)
-                {
-                    foam2Columns
-                        << "\t" << allVectorFields[fieldI][cellI].component(0)
-                        << "\t" << allVectorFields[fieldI][cellI].component(1)
-                        << "\t" << allVectorFields[fieldI][cellI].component(2);
-                }
-                foam2Columns << nl;
-            }
-
-            while (!storedObjects.empty())
-            {
-                storedObjects.pop()->checkOut();
+                // Important, must be nl instead of endl, which is much slower
+                foam2ColumnsEulerian << nl;
             }
         }
     }
