@@ -180,7 +180,7 @@ int main(int argc, char *argv[])
                     }
 
                     passiveParticleCloud parcels(mesh, cloudDirs[i]);
-
+                    label iParticle(0);
                     forAllConstIter(passiveParticleCloud, parcels, iter)
                     {
                         // Loop for each particle
@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
                             << ppi.position().component(2) << "\t"
                             << ppi.origId() << "\t"
                             << ppi.origProc();
-                        label iParticle(0);
+
                         forAll(allLagrangianFields, fieldI)
                         {
                             foam2ColumnsLagrangian << "\t" << allLagrangianFields[fieldI][iParticle];
